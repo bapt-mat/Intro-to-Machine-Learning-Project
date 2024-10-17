@@ -20,9 +20,10 @@ np.random.seed(42)
 # TODO for the best k, redo cross val to tune the best distance metric
 # TODO mixing/averaging distances metrics and compare the scores
 # TODO modify assert into raise ValueError for user input verif
-# TODO PRECOMPUTE THE DISTANCES OF THE TRAINING SET before cross-val
 # TODO return just the conf matrix and then implement functions that calculate the other metrics based on it
 # TODO make some plots for the presentation of the numbers of each class in the training and test set for ex.
+
+# TODO precomputing distances considered as cheating ?
 
 
 # %% [markdown]
@@ -111,17 +112,8 @@ print(nb_classes_test[1])
 def euclidian_dist_array(x, x_array):
     return np.linalg.norm(x_array - x, axis=1).reshape(-1, 1)
 
-training_data_distance_array = np.zeros((x_train.shape[0], x_train.shape[0]))
-
-for i in range(x_train.shape[0]):
-    training_data_distance_array[i] = euclidian_dist_array(x_train[i], x_train).ravel()
-    
-print(training_data_distance_array)
-print(training_data_distance_array.shape)
-
-""" test = scipy.spatial.distance_matrix(x_train, x_train, p=2)
-print(test)
-print(test.shape) """
+def distance_matrix(matrixA, matrixB):
+    return scipy.spatial.distance_matrix(matrixA, matrixB, p=2)
 
 def accuracy(nb_true, nb_total):
     return (nb_true * 100) / nb_total
@@ -131,27 +123,28 @@ def accuracy(nb_true, nb_total):
 
 # %%
 # Returns the majority class from the features amongst the k nearest neighbors of new_input 
-def knn(new_input, features, labels, k):
+def knn(new_input, features, labels, k, list_dist_mat, num_fold, index):
     # Computing the distance from new_input to every x in features
-    dist_array = euclidian_dist_array(new_input, features)
+    #dist_array = euclidian_dist_array(new_input, features)
 
-    # Associating the distance array with their corresponding labels
-    dist_array_labeled = np.hstack([dist_array, labels])
+    dist_array = np.array(list_dist_mat[num_fold][index])
 
-    # Sorting the array by increasing distance order (keeping the labels associated)
-    sorted_indices = np.argsort(dist_array_labeled[:, 0])
-    sorted_array = dist_array_labeled[sorted_indices]
+    # Sorting the array by increasing distance order and getting the indices to get the labels
+    sorted_indices = np.argsort(dist_array)
 
+    #Getting the classes
+    classes = labels[sorted_indices]
+    
     # Count the number of occurences of each class Yj among the k nearest neighbors
-    label, counts = np.unique(sorted_array[:k, 1], return_counts=True, axis=0)
+    label, counts = np.unique(classes[:k, 0], return_counts=True, axis=0)
     results = dict(zip(label, counts))
 
     # Returning the majority class among the k nearest neighbors
     majority_class = max(results, key=results.get)
     return majority_class
 
-# Returns the accuracy of the prediction of the x_set_test amongst the x_set_train
-def prediction_metrics(x_set_train, y_set_train, x_set_test, y_set_test, k):
+# Returns the accuracy, confusion matrix of the prediction of the x_set_test amongst the x_set_train
+def prediction_metrics(x_set_train, y_set_train, x_set_test, y_set_test, k, num_fold, list_dist_mat):
     right_predictions = 0
     assert x_set_train.shape == x_set_train.shape, "Error : x_set_train, x_set_test not the same shape"
     len_x_set_test = len(x_set_test)
@@ -160,8 +153,9 @@ def prediction_metrics(x_set_train, y_set_train, x_set_test, y_set_test, k):
     nb_classes = len(classes)
     confusion_matrix = np.zeros((nb_classes, nb_classes))
 
+    # Predict the class for each point of the x_set_test amongst the x_set_train
     for i in range(len_x_set_test) :
-        y_pred = knn(x_set_test[i], x_set_train, y_set_train, k)
+        y_pred = knn(x_set_test[i], x_set_train, y_set_train, k, list_dist_mat, num_fold, i)
         y_actual = y_set_test[i, 0]
 
         if (y_pred == y_actual):
@@ -179,7 +173,7 @@ def prediction_metrics(x_set_train, y_set_train, x_set_test, y_set_test, k):
 # ## Tuning k by cross-validation
 
 # %%
-#Splitting the training set into x_subsets for cross-validation
+# Splitting the training set into x_subsets for cross-validation
 def k_folds(x_training_set, y_training_set, nb_folds):
     if nb_folds > x_training_set.shape[0]:
         raise ValueError("Error : number of folds exceeding the number of samples in the dataset.")
@@ -197,7 +191,7 @@ def k_folds(x_training_set, y_training_set, nb_folds):
     return x, y
 
 # Returns the metrics for a given k using cross-validation
-def cross_validation(k, x_train_folds, y_train_folds, nb_folds):
+def cross_validation(k, x_train_folds, y_train_folds, nb_folds, list_dist_mat):
     fold_accuracies = []
     fold_confusion_matrices = []
 
@@ -213,7 +207,7 @@ def cross_validation(k, x_train_folds, y_train_folds, nb_folds):
 
         fold_accuracy, fold_cm = (prediction_metrics(x_set_train=x_tmp_training, y_set_train=y_tmp_training, 
                                                      x_set_test=x_val_fold, y_set_test=y_val_fold, 
-                                                     k=k))
+                                                     k=k, num_fold=i, list_dist_mat=list_dist_mat))
         fold_accuracies.append(fold_accuracy)
         fold_confusion_matrices.append(fold_cm)
 
@@ -225,7 +219,7 @@ def cross_validation(k, x_train_folds, y_train_folds, nb_folds):
     return mean_accuracy, mean_confusion_matrix
 
 # Returns the best k using cross-validation
-def tuning_k(nb_folds, x_folds, y_folds, k_range):
+def tuning_k(nb_folds, x_folds, y_folds, k_range, list_dist_mat):
     list_accuracies = []
     list_confusion_matrices = []
 
@@ -233,7 +227,7 @@ def tuning_k(nb_folds, x_folds, y_folds, k_range):
     for k in k_range : 
         print("k = "+str(k))
         # Get the mean metrics for this k over the entire folds using cross-validation
-        mean_acc, mean_cm = cross_validation(k, x_folds, y_folds, nb_folds)
+        mean_acc, mean_cm = cross_validation(k, x_folds, y_folds, nb_folds, list_dist_mat)
         list_accuracies.append(mean_acc)  
         list_confusion_matrices.append(mean_cm)
         print("Mean accuracy = "+str(mean_acc))
@@ -245,11 +239,24 @@ def tuning_k(nb_folds, x_folds, y_folds, k_range):
     # Returning the best k found, the mean accuracies for each k over the folds, and the mean CM for each k
     return best_k, list_accuracies, list_confusion_matrices
 
+# Returns a list of distances matrix of each fold of x_folds against the remaining folds
+def list_distance_matrix(nb_folds, x_folds):
+    # Precompute the distances between each fold and the k-1 other folds to accelerate computation
+    list_dist_mat = []
+    for i in range(nb_folds) : 
+        x_tmp_training = np.concatenate([x_folds[j] for j in range(nb_folds) if j != i], axis=0)
+        x_val_fold = x_folds[i]
+        dist_mat = distance_matrix(x_val_fold, x_tmp_training)
+        list_dist_mat.append(dist_mat)
+    return list_dist_mat
+
 nb_folds = 5
 x_subsets, y_subsets = k_folds(x_train, y_train, nb_folds)
 k_max = int(x_train.shape[0] - (x_train.shape[0] / nb_folds))
-k_range = range(3100, 3201)
-best_k, accuracies, confusion_matrices = tuning_k(nb_folds=nb_folds, x_folds=x_subsets, y_folds=y_subsets, k_range=k_range)
+k_range = range(1, 100)
+list_dist_mat = list_distance_matrix(nb_folds=nb_folds, x_folds=x_subsets)
+
+best_k, accuracies, confusion_matrices = tuning_k(nb_folds=nb_folds, x_folds=x_subsets, y_folds=y_subsets, k_range=k_range, list_dist_mat=list_dist_mat)
 max_accuracy = max(accuracies)
 
 
@@ -299,7 +306,7 @@ plot_confusion_matrix(confusion_mat_best_k,"Confusion matrix for k = "+str(best_
 # %%
 # Prediction of the test set
 # For each example in the test set, predict it using the training set and the best k found
-test_acc, test_cm = prediction_metrics(x_set_train=x_train, y_set_train=y_train, x_set_test=x_test, y_set_test=y_test, k=best_k)
+test_acc, test_cm = prediction_metrics(x_set_train=x_train, y_set_train=y_train, x_set_test=x_test, y_set_test=y_test, k=best_k, n_fold=1, list_dist_mat=distance_matrix(x_train, x_test))
 print("Accuracy : "+str(test_acc))
 plot_confusion_matrix(test_cm,"Confusion matrix for k = "+str(best_k)+" of test set")
 
