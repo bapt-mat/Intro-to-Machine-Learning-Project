@@ -1,1 +1,1 @@
-Work in progress, still in development
+Work in progress
